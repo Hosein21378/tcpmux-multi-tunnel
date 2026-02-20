@@ -1,0 +1,571 @@
+#!/bin/bash
+
+################################################################################
+#                                                                              #
+#          TCPMUX Multi-Tunnel Interactive Setup Script                       #
+#          یک سرور ایران → 3 سرور خارج                                       #
+#                                                                              #
+################################################################################
+
+set -e
+
+# رنگ‌ها
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+BOLD='\033[1m'
+
+# متغیرها
+CONFIG_FILE="config.yaml"
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ============================================
+# توابع کمکی
+# ============================================
+
+clear_screen() {
+    clear
+}
+
+print_header() {
+    echo ""
+    echo -e "${BOLD}${CYAN}╔════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${BOLD}${CYAN}║     TCPMUX Multi-Tunnel Interactive Setup                      ║${NC}"
+    echo -e "${BOLD}${CYAN}║     سیستم تانل چند‌گانه تی‌سی‌پی‌مالتی‌پلکس                      ║${NC}"
+    echo -e "${BOLD}${CYAN}╚══════════════════════��═════════════════════════════════════════╝${NC}"
+    echo ""
+}
+
+print_step() {
+    echo -e "${BOLD}${BLUE}▶ $1${NC}"
+}
+
+print_success() {
+    echo -e "${GREEN}✓ $1${NC}"
+}
+
+print_error() {
+    echo -e "${RED}✗ $1${NC}"
+}
+
+print_warning() {
+    echo -e "${YELLOW}⚠ $1${NC}"
+}
+
+read_input() {
+    local prompt="$1"
+    local default="$2"
+    local input
+    
+    if [ -n "$default" ]; then
+        read -p "$(echo -e ${CYAN}$prompt${NC}) [${YELLOW}$default${NC}]: " input
+        echo "${input:-$default}"
+    else
+        read -p "$(echo -e ${CYAN}$prompt${NC}): " input
+        echo "$input"
+    fi
+}
+
+read_password() {
+    local prompt="$1"
+    local password
+    
+    read -sp "$(echo -e ${CYAN}$prompt${NC}): " password
+    echo ""
+    echo "$password"
+}
+
+read_yes_no() {
+    local prompt="$1"
+    local answer
+    
+    while true; do
+        read -p "$(echo -e ${CYAN}$prompt${NC}) [y/n]: " answer
+        case $answer in
+            [Yy]|[Yy][Ee][Ss]) echo "true"; return 0 ;;
+            [Nn]|[Nn][Oo]) echo "false"; return 0 ;;
+            *) print_error "لطفاً yes یا no بنویسید" ;;
+        esac
+    done
+}
+
+# ============================================
+# بخش 1: تنظیم سرور ایران
+# ============================================
+
+setup_iran_server() {
+    clear_screen
+    print_header
+    print_step "تنظیم سرور ایران (TCPMUX HUB)"
+    echo ""
+    
+    IRAN_IP=$(read_input "IP سرور ایران" "192.168.1.100")
+    IRAN_HOSTNAME=$(read_input "نام Host سرور ایران" "iran-gateway")
+    IRAN_USERNAME=$(read_input "نام کاربری Root" "root")
+    IRAN_SSH_PORT=$(read_input "SSH Port" "22")
+    IRAN_OS=$(read_input "سیستم‌عامل (ubuntu/debian/centos)" "ubuntu")
+    
+    # پرسش از Password یا SSH Key
+    echo ""
+    print_step "روش احراز هویت"
+    AUTH_METHOD=$(read_input "استفاده از Password یا SSH Key؟ (password/key)" "password")
+    
+    if [ "$AUTH_METHOD" = "key" ]; then
+        IRAN_SSH_KEY=$(read_input "مسیر SSH Key" "$HOME/.ssh/id_rsa")
+    else
+        IRAN_PASSWORD=$(read_password "رمز عبور Root")
+    fi
+    
+    IRAN_NETWORK=$(read_input "شبکه درونی (اختیاری)" "")
+    
+    echo ""
+    print_success "اطلاعات سرور ایران ثبت شد"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "IP:        $IRAN_IP"
+    echo "Hostname:  $IRAN_HOSTNAME"
+    echo "Username:  $IRAN_USERNAME"
+    echo "SSH Port:  $IRAN_SSH_PORT"
+    echo "OS:        $IRAN_OS"
+    echo "Auth:      $AUTH_METHOD"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+}
+
+# ============================================
+# بخش 2: تنظیم سرورهای خارج
+# ============================================
+
+setup_remote_server() {
+    local server_num=$1
+    
+    clear_screen
+    print_header
+    print_step "تنظیم سرور $server_num (خارج)"
+    echo ""
+    
+    local var_prefix="SERVER${server_num}_"
+    
+    eval "${var_prefix}NAME=$(read_input "نام سرور" "Server-$server_num")"
+    eval "${var_prefix}COUNTRY=$(read_input "کشور سرور" "Unknown")"
+    eval "${var_prefix}IP=$(read_input "IP Address سرور")"
+    eval "${var_prefix}HOSTNAME=$(read_input "نام Host سرور")"
+    eval "${var_prefix}USERNAME=$(read_input "نام کاربری Root" "root")"
+    eval "${var_prefix}SSH_PORT=$(read_input "SSH Port" "22")"
+    eval "${var_prefix}OS=$(read_input "سیستم‌عامل (ubuntu/debian/centos)" "ubuntu")"
+    
+    # روش احراز هویت
+    echo ""
+    print_step "روش احراز هویت"
+    AUTH_METHOD=$(read_input "استفاده از Password یا SSH Key؟ (password/key)" "password")
+    
+    if [ "$AUTH_METHOD" = "key" ]; then
+        eval "${var_prefix}SSH_KEY=$(read_input "مسیر SSH Key" "$HOME/.ssh/id_rsa")"
+    else
+        eval "${var_prefix}PASSWORD=$(read_password "رمز عبور Root")"
+    fi
+    
+    # Ports برای Forwarding
+    echo ""
+    print_step "پورت‌های Forwarding"
+    PORTS=$(read_input "پورت‌های فوروارد (مثال: 80,443,8080 یا 2050-2060)" "80,443")
+    eval "${var_prefix}PORTS=\"$PORTS\""
+    
+    # Load Balancer Priority
+    PRIORITY=$(read_input "اولویت Load Balancer (1-100)" "$server_num")
+    eval "${var_prefix}PRIORITY=$PRIORITY"
+    
+    echo ""
+    print_success "اطلاعات سرور $server_num ثبت شد"
+}
+
+setup_all_remote_servers() {
+    for i in 1 2 3; do
+        setup_remote_server $i
+    done
+}
+
+# ============================================
+# بخش 3: تنظیمات اضافی
+# ============================================
+
+setup_advanced_options() {
+    clear_screen
+    print_header
+    print_step "تنظیمات پیشرفته"
+    echo ""
+    
+    # Load Balancing Algorithm
+    echo "الگوریتم Load Balancer:"
+    echo "1) Round Robin (ترتیبی)"
+    echo "2) Least Connection (کمترین اتصال)"
+    echo "3) Priority Based (اولویت)"
+    echo "4) Latency Based (کمترین تاخیر)"
+    echo ""
+    LB_CHOICE=$(read_input "انتخاب کنید" "1")
+    
+    case $LB_CHOICE in
+        1) LB_ALGORITHM="round_robin" ;;
+        2) LB_ALGORITHM="least_connection" ;;
+        3) LB_ALGORITHM="priority" ;;
+        4) LB_ALGORITHM="latency" ;;
+        *) LB_ALGORITHM="round_robin" ;;
+    esac
+    
+    # Failover
+    echo ""
+    FAILOVER=$(read_yes_no "فعال کردن Failover خودکار؟")
+    
+    if [ "$FAILOVER" = "true" ]; then
+        FAILOVER_THRESHOLD=$(read_input "تعداد خرابی برای Failover" "3")
+        HEALTH_CHECK_INTERVAL=$(read_input "بازه‌ی Health Check (ثانیه)" "30")
+    else
+        FAILOVER_THRESHOLD=0
+        HEALTH_CHECK_INTERVAL=60
+    fi
+    
+    # Monitoring
+    echo ""
+    MONITORING=$(read_yes_no "فعال کردن Monitoring و Traffic Analysis؟")
+    
+    # Encryption
+    echo ""
+    ENCRYPTION=$(read_yes_no "فعال کردن Encryption؟")
+    
+    # Auto-start
+    echo ""
+    AUTOSTART=$(read_yes_no "Auto-start با بوت سیستم؟")
+    
+    # Logging Level
+    echo ""
+    echo "سطح Logging:"
+    echo "1) DEBUG (جزئیات کامل)"
+    echo "2) INFO (معلومات عادی)"
+    echo "3) WARNING (هشدارها)"
+    echo "4) ERROR (فقط خطاها)"
+    echo ""
+    LOG_CHOICE=$(read_input "انتخاب کنید" "2")
+    
+    case $LOG_CHOICE in
+        1) LOG_LEVEL="DEBUG" ;;
+        2) LOG_LEVEL="INFO" ;;
+        3) LOG_LEVEL="WARNING" ;;
+        4) LOG_LEVEL="ERROR" ;;
+        *) LOG_LEVEL="INFO" ;;
+    esac
+    
+    print_success "تنظیمات پیشرفته ثبت شد"
+}
+
+# ============================================
+# بخش 4: تایید خلاصه و ذخیره
+# ============================================
+
+show_summary() {
+    clear_screen
+    print_header
+    print_step "خلاصه تنظیمات"
+    echo ""
+    
+    echo -e "${BOLD}┌─ سرور ایران ─────────────────────────────┐${NC}"
+    echo "  IP:           $IRAN_IP"
+    echo "  Hostname:     $IRAN_HOSTNAME"
+    echo "  Username:     $IRAN_USERNAME"
+    echo "  SSH Port:     $IRAN_SSH_PORT"
+    echo "  OS:           $IRAN_OS"
+    echo "  Auth Method:  $AUTH_METHOD"
+    echo -e "${BOLD}└───────────────────────────────────────────┘${NC}"
+    echo ""
+    
+    echo -e "${BOLD}┌─ سرور 1 ─────────────────────────────────┐${NC}"
+    echo "  نام:          $SERVER1_NAME"
+    echo "  کشور:         $SERVER1_COUNTRY"
+    echo "  IP:           $SERVER1_IP"
+    echo "  Ports:        $SERVER1_PORTS"
+    echo "  Priority:     $SERVER1_PRIORITY"
+    echo -e "${BOLD}└───────────────────────────────────────────┘${NC}"
+    echo ""
+    
+    echo -e "${BOLD}┌─ سرور 2 ─────────────────────────────────┐${NC}"
+    echo "  نام:          $SERVER2_NAME"
+    echo "  کشور:         $SERVER2_COUNTRY"
+    echo "  IP:           $SERVER2_IP"
+    echo "  Ports:        $SERVER2_PORTS"
+    echo "  Priority:     $SERVER2_PRIORITY"
+    echo -e "${BOLD}└───────────────────────────────────────────┘${NC}"
+    echo ""
+    
+    echo -e "${BOLD}┌─ سرور 3 ─────────────────────────────────┐${NC}"
+    echo "  نام:          $SERVER3_NAME"
+    echo "  کشور:         $SERVER3_COUNTRY"
+    echo "  IP:           $SERVER3_IP"
+    echo "  Ports:        $SERVER3_PORTS"
+    echo "  Priority:     $SERVER3_PRIORITY"
+    echo -e "${BOLD}└───────────────────────────────────────────┘${NC}"
+    echo ""
+    
+    echo -e "${BOLD}┌─ تنظیمات ─────────────────────────────────┐${NC}"
+    echo "  Load Balancer:    $LB_ALGORITHM"
+    echo "  Failover:         $FAILOVER"
+    echo "  Monitoring:       $MONITORING"
+    echo "  Encryption:       $ENCRYPTION"
+    echo "  Auto-start:       $AUTOSTART"
+    echo "  Log Level:        $LOG_LEVEL"
+    echo -e "${BOLD}└───────────────────────────────────────────┘${NC}"
+    echo ""
+}
+
+# ============================================
+# ذخیره‌ی Configuration
+# ============================================
+
+generate_config_yaml() {
+    cat > "$CONFIG_FILE" << 'YAML_START'
+# TCPMUX Multi-Tunnel Configuration
+# Generated by interactive-setup.sh
+
+# سرور ایران (TCPMUX HUB)
+iran_server:
+  name: "Iran Gateway"
+  ip: "IRAN_IP"
+  hostname: "IRAN_HOSTNAME"
+  ssh_port: IRAN_SSH_PORT
+  username: "IRAN_USERNAME"
+  password: "IRAN_PASSWORD"
+  ssh_key: "IRAN_SSH_KEY"
+  os: "IRAN_OS"
+  tcpmux_port: 1024
+  local_network: "IRAN_NETWORK"
+  auth_method: "IRAN_AUTH_METHOD"
+
+# سرورهای خارج
+remote_servers:
+  
+  server_1:
+    name: "SERVER1_NAME"
+    country: "SERVER1_COUNTRY"
+    ip: "SERVER1_IP"
+    hostname: "SERVER1_HOSTNAME"
+    ssh_port: SERVER1_SSH_PORT
+    username: "SERVER1_USERNAME"
+    password: "SERVER1_PASSWORD"
+    ssh_key: "SERVER1_SSH_KEY"
+    os: "SERVER1_OS"
+    tcpmux_port: 1025
+    auth_method: "SERVER1_AUTH_METHOD"
+    forwarded_ports: [SERVER1_PORTS]
+    enabled: true
+    priority: SERVER1_PRIORITY
+    max_connections: 100
+    
+  server_2:
+    name: "SERVER2_NAME"
+    country: "SERVER2_COUNTRY"
+    ip: "SERVER2_IP"
+    hostname: "SERVER2_HOSTNAME"
+    ssh_port: SERVER2_SSH_PORT
+    username: "SERVER2_USERNAME"
+    password: "SERVER2_PASSWORD"
+    ssh_key: "SERVER2_SSH_KEY"
+    os: "SERVER2_OS"
+    tcpmux_port: 1025
+    auth_method: "SERVER2_AUTH_METHOD"
+    forwarded_ports: [SERVER2_PORTS]
+    enabled: true
+    priority: SERVER2_PRIORITY
+    max_connections: 100
+    
+  server_3:
+    name: "SERVER3_NAME"
+    country: "SERVER3_COUNTRY"
+    ip: "SERVER3_IP"
+    hostname: "SERVER3_HOSTNAME"
+    ssh_port: SERVER3_SSH_PORT
+    username: "SERVER3_USERNAME"
+    password: "SERVER3_PASSWORD"
+    ssh_key: "SERVER3_SSH_KEY"
+    os: "SERVER3_OS"
+    tcpmux_port: 1025
+    auth_method: "SERVER3_AUTH_METHOD"
+    forwarded_ports: [SERVER3_PORTS]
+    enabled: true
+    priority: SERVER3_PRIORITY
+    max_connections: 100
+
+# Load Balancing
+load_balancer:
+  algorithm: "LB_ALGORITHM"
+  health_check_interval: HEALTH_CHECK_INTERVAL
+  failover_enabled: FAILOVER
+  failover_threshold: FAILOVER_THRESHOLD
+
+# Monitoring
+monitoring:
+  enabled: MONITORING
+  traffic_analysis: MONITORING
+  log_interval: 60
+
+# Security
+security:
+  encryption_enabled: ENCRYPTION
+  encryption_type: "TLS"
+  log_level: "LOG_LEVEL"
+
+# Auto-start
+autostart:
+  enabled: AUTOSTART
+  
+# Logging
+logging:
+  level: "LOG_LEVEL"
+  log_file: "/var/log/tcpmux-tunnel.log"
+  rotation: "daily"
+  max_size: "100M"
+  retention_days: 30
+YAML_START
+
+    # جایگزینی متغیرها
+    sed -i "s|IRAN_IP|$IRAN_IP|g" "$CONFIG_FILE"
+    sed -i "s|IRAN_HOSTNAME|$IRAN_HOSTNAME|g" "$CONFIG_FILE"
+    sed -i "s|IRAN_SSH_PORT|$IRAN_SSH_PORT|g" "$CONFIG_FILE"
+    sed -i "s|IRAN_USERNAME|$IRAN_USERNAME|g" "$CONFIG_FILE"
+    sed -i "s|IRAN_PASSWORD|${IRAN_PASSWORD:-N/A}|g" "$CONFIG_FILE"
+    sed -i "s|IRAN_SSH_KEY|${IRAN_SSH_KEY:-N/A}|g" "$CONFIG_FILE"
+    sed -i "s|IRAN_OS|$IRAN_OS|g" "$CONFIG_FILE"
+    sed -i "s|IRAN_NETWORK|${IRAN_NETWORK:-0.0.0.0/0}|g" "$CONFIG_FILE"
+    sed -i "s|IRAN_AUTH_METHOD|$AUTH_METHOD|g" "$CONFIG_FILE"
+    
+    # جایگزینی اطلاعات سرور 1
+    sed -i "s|SERVER1_NAME|$SERVER1_NAME|g" "$CONFIG_FILE"
+    sed -i "s|SERVER1_COUNTRY|$SERVER1_COUNTRY|g" "$CONFIG_FILE"
+    sed -i "s|SERVER1_IP|$SERVER1_IP|g" "$CONFIG_FILE"
+    sed -i "s|SERVER1_HOSTNAME|$SERVER1_HOSTNAME|g" "$CONFIG_FILE"
+    sed -i "s|SERVER1_SSH_PORT|$SERVER1_SSH_PORT|g" "$CONFIG_FILE"
+    sed -i "s|SERVER1_USERNAME|$SERVER1_USERNAME|g" "$CONFIG_FILE"
+    sed -i "s|SERVER1_PASSWORD|${SERVER1_PASSWORD:-N/A}|g" "$CONFIG_FILE"
+    sed -i "s|SERVER1_SSH_KEY|${SERVER1_SSH_KEY:-N/A}|g" "$CONFIG_FILE"
+    sed -i "s|SERVER1_OS|$SERVER1_OS|g" "$CONFIG_FILE"
+    sed -i "s|SERVER1_AUTH_METHOD|$AUTH_METHOD|g" "$CONFIG_FILE"
+    
+    # تبدیل پورت‌ها به فرمت YAML
+    PORTS1=$(echo "$SERVER1_PORTS" | sed 's/,/,/g')
+    sed -i "s|SERVER1_PORTS|$PORTS1|g" "$CONFIG_FILE"
+    sed -i "s|SERVER1_PRIORITY|${SERVER1_PRIORITY:-1}|g" "$CONFIG_FILE"
+    
+    # جایگزینی اطلاعات سرور 2
+    sed -i "s|SERVER2_NAME|$SERVER2_NAME|g" "$CONFIG_FILE"
+    sed -i "s|SERVER2_COUNTRY|$SERVER2_COUNTRY|g" "$CONFIG_FILE"
+    sed -i "s|SERVER2_IP|$SERVER2_IP|g" "$CONFIG_FILE"
+    sed -i "s|SERVER2_HOSTNAME|$SERVER2_HOSTNAME|g" "$CONFIG_FILE"
+    sed -i "s|SERVER2_SSH_PORT|$SERVER2_SSH_PORT|g" "$CONFIG_FILE"
+    sed -i "s|SERVER2_USERNAME|$SERVER2_USERNAME|g" "$CONFIG_FILE"
+    sed -i "s|SERVER2_PASSWORD|${SERVER2_PASSWORD:-N/A}|g" "$CONFIG_FILE"
+    sed -i "s|SERVER2_SSH_KEY|${SERVER2_SSH_KEY:-N/A}|g" "$CONFIG_FILE"
+    sed -i "s|SERVER2_OS|$SERVER2_OS|g" "$CONFIG_FILE"
+    sed -i "s|SERVER2_AUTH_METHOD|$AUTH_METHOD|g" "$CONFIG_FILE"
+    
+    PORTS2=$(echo "$SERVER2_PORTS" | sed 's/,/,/g')
+    sed -i "s|SERVER2_PORTS|$PORTS2|g" "$CONFIG_FILE"
+    sed -i "s|SERVER2_PRIORITY|${SERVER2_PRIORITY:-2}|g" "$CONFIG_FILE"
+    
+    # جایگزینی اطلاعات سرور 3
+    sed -i "s|SERVER3_NAME|$SERVER3_NAME|g" "$CONFIG_FILE"
+    sed -i "s|SERVER3_COUNTRY|$SERVER3_COUNTRY|g" "$CONFIG_FILE"
+    sed -i "s|SERVER3_IP|$SERVER3_IP|g" "$CONFIG_FILE"
+    sed -i "s|SERVER3_HOSTNAME|$SERVER3_HOSTNAME|g" "$CONFIG_FILE"
+    sed -i "s|SERVER3_SSH_PORT|$SERVER3_SSH_PORT|g" "$CONFIG_FILE"
+    sed -i "s|SERVER3_USERNAME|$SERVER3_USERNAME|g" "$CONFIG_FILE"
+    sed -i "s|SERVER3_PASSWORD|${SERVER3_PASSWORD:-N/A}|g" "$CONFIG_FILE"
+    sed -i "s|SERVER3_SSH_KEY|${SERVER3_SSH_KEY:-N/A}|g" "$CONFIG_FILE"
+    sed -i "s|SERVER3_OS|$SERVER3_OS|g" "$CONFIG_FILE"
+    sed -i "s|SERVER3_AUTH_METHOD|$AUTH_METHOD|g" "$CONFIG_FILE"
+    
+    PORTS3=$(echo "$SERVER3_PORTS" | sed 's/,/,/g')
+    sed -i "s|SERVER3_PORTS|$PORTS3|g" "$CONFIG_FILE"
+    sed -i "s|SERVER3_PRIORITY|${SERVER3_PRIORITY:-3}|g" "$CONFIG_FILE"
+    
+    # تنظیمات پیشرفته
+    sed -i "s|LB_ALGORITHM|$LB_ALGORITHM|g" "$CONFIG_FILE"
+    sed -i "s|HEALTH_CHECK_INTERVAL|${HEALTH_CHECK_INTERVAL:-30}|g" "$CONFIG_FILE"
+    sed -i "s|FAILOVER|$FAILOVER|g" "$CONFIG_FILE"
+    sed -i "s|FAILOVER_THRESHOLD|${FAILOVER_THRESHOLD:-3}|g" "$CONFIG_FILE"
+    sed -i "s|MONITORING|$MONITORING|g" "$CONFIG_FILE"
+    sed -i "s|ENCRYPTION|$ENCRYPTION|g" "$CONFIG_FILE"
+    sed -i "s|AUTOSTART|$AUTOSTART|g" "$CONFIG_FILE"
+    sed -i "s|LOG_LEVEL|$LOG_LEVEL|g" "$CONFIG_FILE"
+}
+
+# ============================================
+# برنامه اصلی
+# ============================================
+
+main() {
+    clear_screen
+    print_header
+    
+    echo -e "${BOLD}خوش‌آمدید!${NC}"
+    echo ""
+    echo "این اسکریپت شما را در تنظیم سیستم تانل چند‌گانه TCPMUX کمک می‌کند."
+    echo ""
+    print_warning "مطمئن شوید که اطلاعات صحیح را وارد می‌کنید"
+    echo ""
+    read -p "برای شروع Enter بزنید..."
+    
+    # مراحل تنظیم
+    setup_iran_server
+    read -p "Enter برای ادامه..."
+    
+    setup_all_remote_servers
+    read -p "Enter برای ادامه..."
+    
+    setup_advanced_options
+    read -p "Enter برای ادامه..."
+    
+    # خلاصه و تایید
+    show_summary
+    
+    echo ""
+    CONFIRM=$(read_yes_no "آیا تنظیمات صحیح است؟")
+    
+    if [ "$CONFIRM" = "false" ]; then
+        print_error "تنظیمات لغو شد"
+        exit 1
+    fi
+    
+    # ذخیره فایل
+    clear_screen
+    print_header
+    print_step "درحال ذخیره‌ی تنظیمات..."
+    
+    generate_config_yaml
+    
+    if [ -f "$CONFIG_FILE" ]; then
+        print_success "فایل $CONFIG_FILE با موفقیت ایجاد شد"
+        echo ""
+        echo "مسیر فایل: $(pwd)/$CONFIG_FILE"
+        echo ""
+    else
+        print_error "خطا در ایجاد فایل تنظیمات"
+        exit 1
+    fi
+    
+    # مرحله بعدی
+    echo ""
+    print_step "مراحل بعدی:"
+    echo ""
+    echo "1) بررسی فایل تنظیمات:"
+    echo "   ${CYAN}cat $CONFIG_FILE${NC}"
+    echo ""
+    echo "2) نصب ابزارهای لازم:"
+    echo "   ${CYAN}sudo ./install.sh${NC}"
+    echo ""
+    echo "3) اجرای سیستم:"
+    echo "   ${CYAN}sudo ./tcpmux-controller.sh${NC}"
+    echo ""
+    
+    read -p "Enter برای خروج..."
+}
+
+# اجرای برنامه
+main
